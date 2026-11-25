@@ -1,0 +1,38 @@
+name: Monitor Don Omar Argentina
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check-website:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install requests beautifulsoup4
+
+      - name: Ejecutar bot
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          WHATSAPP_PHONE: ${{ secrets.WHATSAPP_PHONE }}
+          WHATSAPP_APIKEY: ${{ secrets.WHATSAPP_APIKEY }}
+        run: python bot.py
+
+      - name: Guardar cambios en el estado
+        run: |
+          git config --local user.email "bot@github.com"
+          git config --local user.name "Monitor Bot"
+          git add estado_fechas.json
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Actualiza estado" && git push)
