@@ -21,13 +21,16 @@ jobs:
           python-version: '3.11'
 
       - name: Instalar dependencias
-        run: pip install requests beautifulsoup4 cloudscraper 
+        run: |
+          pip install requests beautifulsoup4 playwright
+          playwright install chromium
 
       - name: Ejecutar bot
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           WHATSAPP_PHONE: ${{ secrets.WHATSAPP_PHONE }}
           WHATSAPP_APIKEY: ${{ secrets.WHATSAPP_APIKEY }}
+          EVENT_NAME: ${{ github.event_name }}
         run: python bot.py
 
       - name: Guardar cambios en el estado
