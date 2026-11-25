@@ -7,9 +7,9 @@ from playwright.sync_api import sync_playwright
 
 ARCHIVO_ESTADO = "estado_fechas.json"
 
-DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK")
-WHATSAPP_PHONE = os.environ.get("WHATSAPP_PHONE")
-WHATSAPP_APIKEY = os.environ.get("WHATSAPP_APIKEY")
+DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK", "").strip()
+WHATSAPP_PHONE = os.environ.get("WHATSAPP_PHONE", "").strip()
+WHATSAPP_APIKEY = os.environ.get("WHATSAPP_APIKEY", "").strip()
 ES_PRUEBA_MANUAL = os.environ.get("EVENT_NAME") == "workflow_dispatch"
 
 
