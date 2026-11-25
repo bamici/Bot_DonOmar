@@ -26,7 +26,7 @@ ARCHIVO_ESTADO = "estado_fechas.json"
 # Credenciales desde GitHub Secrets
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK")
 WHATSAPP_PHONE = os.environ.get("WHATSAPP_PHONE")      # Ej: +5491112345678
-WHATSAPP_APIKEY = os.environ.get("WHATSAPP_APIKEY")    # Clave de CallMeBot
+WHATSAPP_APIKEY = os.environ.get("WHATSAPP_APIKEY")    # Clave de TextMeBot
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -47,8 +47,8 @@ def enviar_whatsapp(mensaje):
         return
     texto_codificado = urllib.parse.quote(f"🚨 ALERTA DON OMAR 🚨\n{mensaje}")
     url = (
-        f"https://api.callmebot.com/whatsapp.php?"
-        f"phone={WHATSAPP_PHONE}&text={texto_codificado}&apikey={WHATSAPP_APIKEY}"
+        f"https://api.textmebot.com/send.php?"
+        f"recipient={WHATSAPP_PHONE}&apikey={WHATSAPP_APIKEY}&text={texto_codificado}"
     )
     requests.get(url, timeout=15)
 
@@ -66,7 +66,6 @@ def analizar_sitios():
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "html.parser")
 
-            # Limpiamos estilos para quedarnos con bloques relevantes y enlaces/botones
             for tag in soup(["style", "svg", "noscript"]):
                 tag.decompose()
 
@@ -101,10 +100,9 @@ def main():
     estado_anterior = cargar_estado_anterior()
 
     if not estado_actual:
-        print("No se pudo extraer información en esta ejecución (posible bloqueo temporal).")
+        print("No se pudo extraer información en esta ejecución.")
         return
 
-    # Primera ejecución: guarda el estado base y te avisa qué detectó en ambos sitios
     if not estado_anterior:
         guardar_estado(estado_actual)
         muestra = "\n".join(f"- {item}" for item in estado_actual[:15])
@@ -116,7 +114,6 @@ def main():
         enviar_whatsapp(msg)
         return
 
-    # Detecta cualquier línea nueva (nueva fecha, botón de compra habilitado, etc.)
     nuevos = [item for item in estado_actual if item not in estado_anterior]
 
     if nuevos:
