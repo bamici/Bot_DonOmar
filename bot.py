@@ -2,9 +2,9 @@ import os
 import json
 import urllib.parse
 import requests
+import cloudscraper
 from bs4 import BeautifulSoup
 
-# Sitios a monitorear en cada ejecución
 SITIOS = [
     {
         "nombre": "Web Oficial Don Omar",
@@ -23,38 +23,40 @@ SITIOS = [
 
 ARCHIVO_ESTADO = "estado_fechas.json"
 
-# Credenciales desde GitHub Secrets
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK")
-WHATSAPP_PHONE = os.environ.get("WHATSAPP_PHONE")      # Ej: +5491112345678
-WHATSAPP_APIKEY = os.environ.get("WHATSAPP_APIKEY")    # Clave de TextMeBot
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept-Language": "es-AR,es;q=0.9,en;q=0.8",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-}
+WHATSAPP_PHONE = os.environ.get("WHATSAPP_PHONE")
+WHATSAPP_APIKEY = os.environ.get("WHATSAPP_APIKEY")
 
 
 def enviar_discord(mensaje):
     if not DISCORD_WEBHOOK:
+        print("⚠️ Falta DISCORD_WEBHOOK en los secretos.")
         return
     data = {"content": f"@everyone 🚨 **¡ALERTA DON OMAR!** 🚨\n{mensaje}"}
-    requests.post(DISCORD_WEBHOOK, json=data, timeout=10)
+    r = requests.post(DISCORD_WEBHOOK, json=data, timeout=15)
+    print(f"Respuesta Discord: {r.status_code}")
 
 
 def enviar_whatsapp(mensaje):
     if not WHATSAPP_PHONE or not WHATSAPP_APIKEY:
+        print("⚠️ Faltan credenciales de WhatsApp en los secretos.")
         return
-    texto_codificado = urllib.parse.quote(f"🚨 ALERTA DON OMAR 🚨\n{mensaje}")
+    # Acortamos a 450 caracteres para evitar errores de URL larga en TextMeBot
+    texto_corto = f"🚨 ALERTA DON OMAR 🚨\n{mensaje}"[:450]
+    texto_codificado = urllib.parse.quote(texto_corto)
     url = (
         f"https://api.textmebot.com/send.php?"
         f"recipient={WHATSAPP_PHONE}&apikey={WHATSAPP_APIKEY}&text={texto_codificado}"
     )
-    requests.get(url, timeout=15)
+    r = requests.get(url, timeout=20)
+    print(f"Respuesta WhatsApp: {r.status_code} - {r.text[:100]}")
 
 
 def analizar_sitios():
     hallazgos = []
+    scraper = cloudscraper.create_scraper(
+        browser={"browser": "chrome", "platform": "windows", "desktop": True}
+    )
 
     for sitio in SITIOS:
         nombre = sitio["nombre"]
@@ -62,7 +64,7 @@ def analizar_sitios():
         claves = sitio["palabras_clave"]
 
         try:
-            resp = requests.get(url, headers=HEADERS, timeout=20)
+            resp = scraper.get(url, timeout=25)
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "html.parser")
 
@@ -77,8 +79,9 @@ def analizar_sitios():
                         if etiqueta not in hallazgos:
                             hallazgos.append(etiqueta)
 
+            print(f"✅ {nombre} leído correctamente.")
         except Exception as e:
-            print(f"Error consultando {nombre} ({url}): {e}")
+            print(f"❌ Error consultando {nombre}: {e}")
 
     return sorted(hallazgos)
 
@@ -105,10 +108,10 @@ def main():
 
     if not estado_anterior:
         guardar_estado(estado_actual)
-        muestra = "\n".join(f"- {item}" for item in estado_actual[:15])
         msg = (
-            f"Bot iniciado monitoreando Don Omar Oficial + AllAccess.\n"
-            f"Detectados {len(estado_actual)} bloques iniciales. Muestra:\n{muestra}"
+            f"Bot activo vigilando Don Omar Oficial y AllAccess.\n"
+            f"Bloques detectados: {len(estado_actual)}.\n"
+            f"Primer dato: {estado_actual[0][:120]}"
         )
         enviar_discord(msg)
         enviar_whatsapp(msg)
@@ -117,12 +120,12 @@ def main():
     nuevos = [item for item in estado_actual if item not in estado_anterior]
 
     if nuevos:
-        detalle = "\n".join(f"👉 {item}" for item in nuevos[:15])
+        detalle = "\n".join(f"👉 {item}" for item in nuevos[:6])
         mensaje = (
-            f"¡Se detectaron CAMBIOS o NUEVA FECHA para Don Omar en Argentina!\n\n"
+            f"¡NUEVA FECHA o CAMBIO detectado para Don Omar!\n\n"
             f"{detalle}\n\n"
-            f"🎟️ AllAccess: https://www.allaccess.com.ar/event/don-omar\n"
-            f"🌐 Oficial: https://donomar.com/pages/preventa"
+            f"AllAccess: https://www.allaccess.com.ar/event/don-omar\n"
+            f"Oficial: https://donomar.com/pages/preventa"
         )
         enviar_discord(mensaje)
         enviar_whatsapp(mensaje)
