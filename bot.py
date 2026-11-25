@@ -2,30 +2,15 @@ import os
 import json
 import urllib.parse
 import requests
-import cloudscraper
 from bs4 import BeautifulSoup
-
-SITIOS = [
-    {
-        "nombre": "Web Oficial Don Omar",
-        "url": "https://donomar.com/pages/preventa",
-        "palabras_clave": ["Buenos Aires", "Argentina", "Vélez", "Velez"]
-    },
-    {
-        "nombre": "AllAccess Argentina",
-        "url": "https://www.allaccess.com.ar/event/don-omar",
-        "palabras_clave": [
-            "Buenos Aires", "Vélez", "Velez", "Octubre", "Noviembre",
-            "Nueva función", "Nueva fecha", "Comprar", "Preventa", "Agotado"
-        ]
-    }
-]
+from playwright.sync_api import sync_playwright
 
 ARCHIVO_ESTADO = "estado_fechas.json"
 
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK")
 WHATSAPP_PHONE = os.environ.get("WHATSAPP_PHONE")
 WHATSAPP_APIKEY = os.environ.get("WHATSAPP_APIKEY")
+ES_PRUEBA_MANUAL = os.environ.get("EVENT_NAME") == "workflow_dispatch"
 
 
 def enviar_discord(mensaje):
@@ -41,7 +26,6 @@ def enviar_whatsapp(mensaje):
     if not WHATSAPP_PHONE or not WHATSAPP_APIKEY:
         print("⚠️ Faltan credenciales de WhatsApp en los secretos.")
         return
-    # Acortamos a 450 caracteres para evitar errores de URL larga en TextMeBot
     texto_corto = f"🚨 ALERTA DON OMAR 🚨\n{mensaje}"[:450]
     texto_codificado = urllib.parse.quote(texto_corto)
     url = (
@@ -52,38 +36,70 @@ def enviar_whatsapp(mensaje):
     print(f"Respuesta WhatsApp: {r.status_code} - {r.text[:100]}")
 
 
+def extraer_bloques(html, nombre_sitio, claves):
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["style", "svg", "noscript", "script"]):
+        tag.decompose()
+
+    encontrados = []
+    for elemento in soup.find_all(["li", "div", "tr", "p", "article", "a", "button", "h1", "h2", "h3"]):
+        txt = elemento.get_text(" ", strip=True)
+        if 3 < len(txt) < 220:
+            if any(clave.lower() in txt.lower() for clave in claves):
+                etiqueta = f"[{nombre_sitio}] {txt}"
+                if etiqueta not in encontrados:
+                    encontrados.append(etiqueta)
+    return encontrados
+
+
 def analizar_sitios():
     hallazgos = []
-    scraper = cloudscraper.create_scraper(
-        browser={"browser": "chrome", "platform": "windows", "desktop": True}
-    )
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    }
 
-    for sitio in SITIOS:
-        nombre = sitio["nombre"]
-        url = sitio["url"]
-        claves = sitio["palabras_clave"]
+    # 1. Web Oficial Don Omar
+    try:
+        resp = requests.get("https://donomar.com/pages/preventa", headers=headers, timeout=20)
+        resp.raise_for_status()
+        items = extraer_bloques(
+            resp.text,
+            "Web Oficial Don Omar",
+            ["Buenos Aires", "Argentina", "Vélez", "Velez"]
+        )
+        hallazgos.extend(items)
+        print(f"✅ Web Oficial Don Omar leída correctamente ({len(items)} bloques).")
+    except Exception as e:
+        print(f"❌ Error consultando Web Oficial Don Omar: {e}")
 
-        try:
-            resp = scraper.get(url, timeout=25)
-            resp.raise_for_status()
-            soup = BeautifulSoup(resp.text, "html.parser")
+    # 2. AllAccess Argentina (con navegador Chromium real para pasar el filtro anti-bots)
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+                locale="es-AR"
+            )
+            page = context.new_page()
+            page.goto("https://www.allaccess.com.ar/event/don-omar", wait_until="domcontentloaded", timeout=35000)
+            page.wait_for_timeout(4000)
+            html_allaccess = page.content()
+            browser.close()
 
-            for tag in soup(["style", "svg", "noscript"]):
-                tag.decompose()
+        items_aa = extraer_bloques(
+            html_allaccess,
+            "AllAccess Argentina",
+            [
+                "Buenos Aires", "Vélez", "Velez", "Octubre", "Noviembre",
+                "Nueva función", "Nueva fecha", "Comprar", "Preventa", "Agotado"
+            ]
+        )
+        hallazgos.extend(items_aa)
+        print(f"✅ AllAccess Argentina leído correctamente ({len(items_aa)} bloques).")
+    except Exception as e:
+        print(f"❌ Error consultando AllAccess Argentina: {e}")
 
-            for elemento in soup.find_all(["li", "div", "tr", "p", "article", "a", "button", "h1", "h2", "h3"]):
-                txt = elemento.get_text(" ", strip=True)
-                if 3 < len(txt) < 220:
-                    if any(clave.lower() in txt.lower() for clave in claves):
-                        etiqueta = f"[{nombre}] {txt}"
-                        if etiqueta not in hallazgos:
-                            hallazgos.append(etiqueta)
-
-            print(f"✅ {nombre} leído correctamente.")
-        except Exception as e:
-            print(f"❌ Error consultando {nombre}: {e}")
-
-    return sorted(hallazgos)
+    return sorted(set(hallazgos))
 
 
 def cargar_estado_anterior():
@@ -106,30 +122,28 @@ def main():
         print("No se pudo extraer información en esta ejecución.")
         return
 
-    if not estado_anterior:
-        guardar_estado(estado_actual)
-        msg = (
-            f"Bot activo vigilando Don Omar Oficial y AllAccess.\n"
-            f"Bloques detectados: {len(estado_actual)}.\n"
-            f"Primer dato: {estado_actual[0][:120]}"
-        )
-        enviar_discord(msg)
-        enviar_whatsapp(msg)
-        return
-
     nuevos = [item for item in estado_actual if item not in estado_anterior]
 
-    if nuevos:
-        detalle = "\n".join(f"👉 {item}" for item in nuevos[:6])
+    if not estado_anterior or nuevos:
+        guardar_estado(estado_actual)
+        lista = nuevos if (estado_anterior and nuevos) else estado_actual
+        detalle = "\n".join(f"👉 {item}" for item in lista[:6])
+        titulo = "¡NUEVA FECHA o CAMBIO detectado para Don Omar!" if estado_anterior else "Bot iniciado y vigilando ambas páginas:"
         mensaje = (
-            f"¡NUEVA FECHA o CAMBIO detectado para Don Omar!\n\n"
+            f"{titulo}\n\n"
             f"{detalle}\n\n"
             f"AllAccess: https://www.allaccess.com.ar/event/don-omar\n"
             f"Oficial: https://donomar.com/pages/preventa"
         )
         enviar_discord(mensaje)
         enviar_whatsapp(mensaje)
-        guardar_estado(estado_actual)
+    elif ES_PRUEBA_MANUAL:
+        msg_prueba = (
+            f"✅ Prueba manual exitosa: el bot está activo y leyendo ambos sitios "
+            f"({len(estado_actual)} bloques vigilados). Sin fechas nuevas por ahora."
+        )
+        enviar_discord(msg_prueba)
+        enviar_whatsapp(msg_prueba)
     else:
         print("Sin novedades en Don Omar ni en AllAccess.")
 
